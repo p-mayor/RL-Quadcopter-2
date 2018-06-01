@@ -1,7 +1,6 @@
-# TODO: your agent here!
 import random
 from collections import namedtuple, deque
-from keras import layers, models, optimizers
+from keras import layers, models, optimizers, regularizers
 from keras import backend as K
 import numpy as np
 import copy
@@ -56,9 +55,10 @@ class Actor:
         states = layers.Input(shape=(self.state_size,), name='states')
 
         # Add hidden layers
-        net = layers.Dense(units=32, activation='relu')(states)
-        net = layers.Dense(units=64, activation='relu')(net)
+        net = layers.Dense(units=16, activation='relu')(states)
         net = layers.Dense(units=32, activation='relu')(net)
+        net = layers.Dense(units=16, activation='relu')(net)
+        net = layers.BatchNormalization(axis=1)(net)
 
         # Try different layer sizes, activations, add batch normalization, regularizers, etc.
 
@@ -81,7 +81,7 @@ class Actor:
 
         # Define optimizer and training function
         optimizer = optimizers.Adam()
-        updates_op = optimizer.get_updates(params=self.model.trainable_weights, loss=loss)
+        updates_op = optimizer.get_updates(params=self.model.trainable_weights, loss=loss, constraints=[0,1])
         self.train_fn = K.function(
             inputs=[self.model.input, action_gradients, K.learning_phase()],
             outputs=[],
@@ -112,12 +112,16 @@ class Critic:
         actions = layers.Input(shape=(self.action_size,), name='actions')
 
         # Add hidden layer(s) for state pathway
-        net_states = layers.Dense(units=32, activation='relu')(states)
-        net_states = layers.Dense(units=64, activation='relu')(net_states)
+        net_states = layers.Dense(units=16, activation='relu')(states)
+        net_states = layers.Dense(units=32, activation='relu')(net_states)
+        net_states = layers.Dense(units=16, activation='relu')(net_states)
+        net_states = layers.BatchNormalization(axis=1)(net_states)
 
         # Add hidden layer(s) for action pathway
-        net_actions = layers.Dense(units=32, activation='relu')(actions)
-        net_actions = layers.Dense(units=64, activation='relu')(net_actions)
+        net_actions = layers.Dense(units=16, activation='relu')(actions)
+        net_actions = layers.Dense(units=32, activation='relu')(net_actions)
+        net_actions = layers.Dense(units=16, activation='relu')(net_actions)
+        net_actions = layers.BatchNormalization(axis=1)(net_actions)
 
         # Try different layer sizes, activations, add batch normalization, regularizers, etc.
 
@@ -169,7 +173,7 @@ class DDPG():
         # Noise process
         self.exploration_mu = 0
         self.exploration_theta = 0.15
-        self.exploration_sigma = 0.5
+        self.exploration_sigma = 0.2
         self.noise = OUNoise(self.action_size, self.exploration_mu, self.exploration_theta, self.exploration_sigma)
 
         # Replay memory
@@ -179,15 +183,12 @@ class DDPG():
 
         # Algorithm parameters
         self.gamma = 0.99  # discount factor
-        self.tau = 0.01  # for soft update of target parameters
-        
+        self.tau = 0.1  # for soft update of target parameters
+
         # Score tracker and learning parameters
-        self.score = -np.inf
-        self.best_score = -np.inf
-        self.noise_scale = 0.1
+        self.best_reward = -np.inf
 
     def reset_episode(self):
-        self.count = 0
         self.total_reward = 0.0
         self.noise.reset()
         state = self.task.reset()
@@ -195,8 +196,9 @@ class DDPG():
         return state
 
     def step(self, action, reward, next_state, done):
-        self.count += 1
         self.total_reward += reward
+        if self.total_reward > self.best_reward:
+            self.best_reward = self.total_reward
          # Save experience / reward
         self.memory.add(self.last_state, action, reward, next_state, done)
 
@@ -239,13 +241,6 @@ class DDPG():
         # Soft-update target models
         self.soft_update(self.critic_local.model, self.critic_target.model)
         self.soft_update(self.actor_local.model, self.actor_target.model)
-        
-        self.score = self.total_reward / float(self.count) if self.count else 0.0
-        if self.score > self.best_score:
-            self.best_score = self.score
-            self.noise_scale = max(0.5 * self.noise_scale, 0.01)
-        else:
-            self.noise_scale = min(2.0 * self.noise_scale, 2.0)
 
     def soft_update(self, local_model, target_model):
         """Soft update model parameters."""
@@ -256,7 +251,7 @@ class DDPG():
 
         new_weights = self.tau * local_weights + (1 - self.tau) * target_weights
         target_model.set_weights(new_weights)
-        
+
 class ReplayBuffer:
     """Fixed-size buffer to store experience tuples."""
 

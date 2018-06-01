@@ -17,6 +17,7 @@ class PolicySearch_Agent():
 
         # Score tracker and learning parameters
         self.best_w = None
+        self.best_reward = -np.inf
         self.best_score = -np.inf
         self.noise_scale = 0.1
 
@@ -33,6 +34,8 @@ class PolicySearch_Agent():
         # Save experience / reward
         self.total_reward += reward
         self.count += 1
+        if self.total_reward > self.best_reward:
+            self.best_reward = self.total_reward
 
         # Learn, if at end of episode
         if done:
@@ -54,4 +57,3 @@ class PolicySearch_Agent():
             self.w = self.best_w
             self.noise_scale = min(2.0 * self.noise_scale, 3.2)
         self.w = self.w + self.noise_scale * np.random.normal(size=self.w.shape)  # equal noise in all directions
-        
